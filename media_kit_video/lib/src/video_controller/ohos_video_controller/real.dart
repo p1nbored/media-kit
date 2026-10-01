@@ -64,7 +64,11 @@ class OhosVideoController extends PlatformVideoController {
       (event) => lock.synchronized(() async {
         final int width;
         final int height;
-        if (event.rotate == 0 || event.rotate == 180) {
+        // `rotate` is nullable and NativePlayer's own video-params handler
+        // reads it as `rotate ?? 0`. Without the same default a null lands in
+        // the 90/270 branch below and transposes every frame.
+        final rotate = event.rotate ?? 0;
+        if (rotate == 0 || rotate == 180) {
           width = event.dw ?? 0;
           height = event.dh ?? 0;
         } else {
