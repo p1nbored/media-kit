@@ -156,6 +156,10 @@ class VideoControllerConfiguration {
   /// Leave null when the system compositor should own the mapping (e.g. when
   /// forwarding dynamic metadata), so mpv passes the signal through untouched.
   ///
+  /// Only applied when HDR is output, i.e. with [usePlatformView] and an
+  /// [ohosHdrMode] other than `no`. Any other output is tone-mapped to SDR
+  /// (BT.709) and this value is ignored.
+  ///
   /// Default: `null`
   final double? ohosHdrTargetPeak;
 

@@ -199,6 +199,12 @@ class OhosVideoController extends PlatformVideoController {
     // Store the [VideoController] in the [_controllers].
     _controllers[handle] = controller;
 
+    // HDR can only reach the panel through the platform view. A texture is
+    // sampled by Flutter as sRGB, so everything else is tone-mapped to SDR
+    // here instead of being sent as BT.2020 PQ and washing out.
+    final hdrOutput =
+        configuration.usePlatformView && configuration.ohosHdrMode != 'no';
+
     // Properties that do not depend on how the surface is obtained.
     final common = <String, String>{
       'hwdec': configuration.hwdec!,
@@ -210,8 +216,16 @@ class OhosVideoController extends PlatformVideoController {
       'vd-lavc-ohos-smart-fluency': 'yes',
       if (configuration.ohosHdrMode != null)
         'ohos-hdr-mode': configuration.ohosHdrMode!,
-      if (configuration.ohosHdrTargetPeak != null)
-        'target-peak': configuration.ohosHdrTargetPeak!.toStringAsFixed(0),
+      if (hdrOutput) ...{
+        if (configuration.ohosHdrTargetPeak != null)
+          'target-peak': configuration.ohosHdrTargetPeak!.toStringAsFixed(0),
+      } else ...{
+        'hdr-compute-peak': 'no',
+        'target-prim': 'bt.709',
+        'target-trc': 'bt.1886',
+        'target-peak': 'auto',
+        'tone-mapping': 'spline',
+      },
     };
 
     if (configuration.usePlatformView) {
