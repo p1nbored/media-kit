@@ -18,11 +18,16 @@ import {
 } from '@ohos/flutter_ohos';
 import { Utils } from './Utils';
 import { VideoOutputManager } from './VideoOutputManager';
+import {
+  MediaKitVideoPlatformViewFactory,
+  MEDIA_KIT_VIDEO_VIEW_TYPE
+} from './MediaKitVideoPlatformView';
 import { common } from '@kit.AbilityKit';
 
 export default class MediaKitVideoPlugin implements FlutterPlugin, MethodCallHandler, AbilityAware {
   private channel: MethodChannel | null = null;
   private videoOutputManager: VideoOutputManager | null = null;
+  private platformViewFactory: MediaKitVideoPlatformViewFactory | null = null;
   binding: FlutterPluginBinding | null = null;
   context: common.UIAbilityContext | null = null;
 
@@ -45,6 +50,11 @@ export default class MediaKitVideoPlugin implements FlutterPlugin, MethodCallHan
     this.channel = new MethodChannel(binding.getBinaryMessenger(), "com.alexmercerind/media_kit_video");
     this.channel.setMethodCallHandler(this);
     this.binding = binding;
+    // Registered unconditionally; the Dart side only instantiates the view
+    // when platform view rendering is requested (needed for HDR output).
+    this.platformViewFactory = new MediaKitVideoPlatformViewFactory();
+    binding.getPlatformViewRegistry()
+      ?.registerViewFactory(MEDIA_KIT_VIDEO_VIEW_TYPE, this.platformViewFactory);
   }
 
   onDetachedFromEngine(binding: FlutterPluginBinding): void {
@@ -79,6 +89,26 @@ export default class MediaKitVideoPlugin implements FlutterPlugin, MethodCallHan
       case "VideoOutputManager.Dispose": {
         const handle = parseInt(call.argument("handle"));
         this.videoOutputManager?.dispose(handle);
+        result.success(null);
+        break;
+      }
+      case "PlatformView.GetSurfaceId": {
+        const viewId = parseInt(call.argument("viewId"));
+        const view = this.platformViewFactory?.getView(viewId);
+        if (view == undefined) {
+          result.error("unavailable", `No platform view for id ${viewId}.`, null);
+          break;
+        }
+        // ArkUI creates the surface asynchronously, so the reply is deferred
+        // until the XComponent actually has one, or null if it never will.
+        view.awaitSurfaceId()
+          .then((surfaceId: string | null) => result.success(surfaceId))
+          .catch((e: Error) => result.error("unavailable", `${e}`, null));
+        break;
+      }
+      case "PlatformView.Dispose": {
+        const viewId = parseInt(call.argument("viewId"));
+        this.platformViewFactory?.removeView(viewId);
         result.success(null);
         break;
       }

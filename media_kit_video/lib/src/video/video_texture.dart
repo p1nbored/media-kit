@@ -18,6 +18,8 @@ import 'package:media_kit_video/src/utils/wakelock.dart';
 import 'package:media_kit_video/src/video_view_parameters.dart';
 import 'package:media_kit_video/src/video_controller/video_controller.dart';
 import 'package:media_kit_video/src/video_controller/platform_video_controller.dart';
+import 'package:media_kit_video/src/video_controller/ohos_video_controller/ohos_video_controller.dart';
+import 'package:media_kit_video/src/video/ohos_platform_video.dart';
 
 /// {@template video}
 ///
@@ -401,7 +403,15 @@ class VideoState extends State<Video> with WidgetsBindingObserver {
                                 return ValueListenableBuilder<Rect?>(
                                   valueListenable: notifier.rect,
                                   builder: (context, rect, _) {
-                                    if (id != null &&
+                                    // On HarmonyOS the video may live in a
+                                    // native XComponent instead of a texture,
+                                    // in which case there is no texture ID to
+                                    // wait for: the platform view creates the
+                                    // surface itself once it is mounted.
+                                    final usePlatformView =
+                                        notifier is OhosVideoController &&
+                                            notifier.usePlatformView;
+                                    if ((id != null || usePlatformView) &&
                                         rect != null &&
                                         _visible) {
                                       return SizedBox(
@@ -418,12 +428,16 @@ class VideoState extends State<Video> with WidgetsBindingObserver {
                                           children: [
                                             const SizedBox(),
                                             Positioned.fill(
-                                              child: Texture(
-                                                textureId: id,
-                                                filterQuality:
-                                                    videoViewParameters
-                                                        .filterQuality,
-                                              ),
+                                              child: usePlatformView
+                                                  ? OhosPlatformVideo(
+                                                      controller: notifier,
+                                                    )
+                                                  : Texture(
+                                                      textureId: id!,
+                                                      filterQuality:
+                                                          videoViewParameters
+                                                              .filterQuality,
+                                                    ),
                                             ),
                                             // Keep the |Texture| hidden before the first frame renders. In native implementation, if no default frame size is passed (through VideoController), a starting 1 pixel sized texture/surface is created to initialize the render context & check for H/W support.
                                             // This is then resized based on the video dimensions & accordingly texture ID, texture, EGLDisplay, EGLSurface etc. (depending upon platform) are also changed. Just don't show that 1 pixel texture to the UI.

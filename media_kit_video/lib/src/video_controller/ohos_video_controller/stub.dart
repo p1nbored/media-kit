@@ -23,6 +23,12 @@ class OhosVideoController extends PlatformVideoController {
   ) =>
       throw UnimplementedError();
 
+  bool get usePlatformView => false;
+
+  Future<void> attachPlatformView(int viewId) => throw UnimplementedError();
+
+  Future<void> detachPlatformView() => throw UnimplementedError();
+
   @override
   Future<void> setSize({int? width, int? height}) => throw UnimplementedError();
 }

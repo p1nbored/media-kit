@@ -122,6 +122,43 @@ class VideoControllerConfiguration {
   /// * [vo] != gpu : `false`
   final bool? androidAttachSurfaceAfterVideoParameters;
 
+  /// Whether to render the video into a native platform view instead of a
+  /// Flutter texture. Currently only honored on HarmonyOS.
+  ///
+  /// A Flutter texture is resampled into the Flutter surface before reaching
+  /// the screen, which discards the color space and HDR metadata attached to
+  /// the video surface, so HDR never engages. A platform view is composited
+  /// natively and that metadata survives. The trade-off is the usual one for
+  /// platform views: compositing costs more and the view cannot be freely
+  /// transformed by Flutter.
+  ///
+  /// Default: `false`
+  final bool usePlatformView;
+
+  /// Sets the `--ohos-hdr-mode` property on the native backend, which decides
+  /// which HDR type is advertised to HarmonyOS.
+  ///
+  /// One of `auto`, `no`, `hdr10`, `hlg` or `vivid`. `vivid` is how Dolby
+  /// Vision gets mapped onto HDR Vivid: libplacebo applies the Dolby Vision
+  /// RPU either way, so only the signalling differs.
+  ///
+  /// Default: `null` (leaves the backend at `auto`)
+  final String? ohosHdrMode;
+
+  /// Sets `--target-peak` (display peak brightness, in nits).
+  ///
+  /// Without it libplacebo infers the target peak from the output colorspace,
+  /// which for PQ means 10000 nits — so it assumes a display far brighter than
+  /// any real panel and skips tone mapping that the display then has to do
+  /// blind. Passing the panel's real peak lets the mapping be computed against
+  /// the actual device.
+  ///
+  /// Leave null when the system compositor should own the mapping (e.g. when
+  /// forwarding dynamic metadata), so mpv passes the signal through untouched.
+  ///
+  /// Default: `null`
+  final double? ohosHdrTargetPeak;
+
   /// {@macro video_controller_configuration}
   const VideoControllerConfiguration({
     this.vo,
@@ -131,6 +168,9 @@ class VideoControllerConfiguration {
     this.scale = 1.0,
     this.enableHardwareAcceleration = true,
     this.androidAttachSurfaceAfterVideoParameters,
+    this.usePlatformView = false,
+    this.ohosHdrMode,
+    this.ohosHdrTargetPeak,
   });
 
   /// Returns a copy of this class with the given fields replaced by the new values.
@@ -142,6 +182,9 @@ class VideoControllerConfiguration {
     int? height,
     bool? enableHardwareAcceleration,
     bool? androidAttachSurfaceAfterVideoParameters,
+    bool? usePlatformView,
+    String? ohosHdrMode,
+    double? ohosHdrTargetPeak,
   }) =>
       VideoControllerConfiguration(
         vo: vo ?? this.vo,
@@ -154,5 +197,8 @@ class VideoControllerConfiguration {
         androidAttachSurfaceAfterVideoParameters:
             androidAttachSurfaceAfterVideoParameters ??
                 this.androidAttachSurfaceAfterVideoParameters,
+        usePlatformView: usePlatformView ?? this.usePlatformView,
+        ohosHdrMode: ohosHdrMode ?? this.ohosHdrMode,
+        ohosHdrTargetPeak: ohosHdrTargetPeak ?? this.ohosHdrTargetPeak,
       );
 }
