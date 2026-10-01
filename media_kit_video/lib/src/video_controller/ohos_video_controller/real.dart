@@ -55,6 +55,28 @@ class OhosVideoController extends PlatformVideoController {
   /// Identifier of the platform view currently backing this controller.
   int? _platformViewId;
 
+  /// Largest surface this platform will actually hand back, per axis.
+  ///
+  /// Measured, not guessed: asking for a 7680x4320 texture buffer on HarmonyOS
+  /// yields a **4096x4096** one. The platform clamps each axis independently,
+  /// so an over-limit request comes back square. mpv then letterboxes the 16:9
+  /// video inside that square (confirmed by `osd-dimensions`: 4096x4096 with
+  /// t=896 b=896, leaving 4096x2304 = 16:9), and because [rect] was built from
+  /// the *requested* size, the compositor stretches a square buffer into a 16:9
+  /// box — 1.875 horizontally against 1.055 vertically, i.e. the picture is
+  /// squashed vertically by 1.78x with mpv's black bars dragged along.
+  ///
+  /// Nothing downstream can detect this: `VideoOutput.setSurfaceSize` swallows
+  /// the failure and reports the request back, so the clamp is silent.
+  /// Scaling the request down uniformly keeps it inside what will be granted,
+  /// which makes the buffer and [rect] agree by construction and preserves the
+  /// aspect ratio exactly (7680x4320 -> 4096x2304 is 0.53333 on both axes).
+  ///
+  /// This caps the render surface only. Decoding still runs at full source
+  /// resolution and libplacebo scales into this surface, so 8K playback is not
+  /// downgraded — and no panel this ships to resolves past the cap anyway.
+  static const int _maxSurfaceDimension = 4096;
+
   /// {@macro ohos_video_controller}
   OhosVideoController._(
     super.player,
@@ -62,8 +84,8 @@ class OhosVideoController extends PlatformVideoController {
   ) {
     videoParamsSubscription = player.stream.videoParams.listen(
       (event) => lock.synchronized(() async {
-        final int width;
-        final int height;
+        int width;
+        int height;
         // `rotate` is nullable and NativePlayer's own video-params handler
         // reads it as `rotate ?? 0`. Without the same default a null lands in
         // the 90/270 branch below and transposes every frame.
@@ -75,6 +97,16 @@ class OhosVideoController extends PlatformVideoController {
           // width & height are swapped for 90 or 270 degrees rotation.
           width = event.dh ?? 0;
           height = event.dw ?? 0;
+        }
+
+        // Keep the request inside what the platform will grant. See
+        // [_maxSurfaceDimension]: an over-limit request is clamped per axis and
+        // comes back square, which the pipeline then stretches into shape.
+        final longest = width > height ? width : height;
+        if (longest > _maxSurfaceDimension) {
+          final scale = _maxSurfaceDimension / longest;
+          width = (width * scale).round().clamp(1, _maxSurfaceDimension);
+          height = (height * scale).round().clamp(1, _maxSurfaceDimension);
         }
 
         final isZero = width == 0 || height == 0;
