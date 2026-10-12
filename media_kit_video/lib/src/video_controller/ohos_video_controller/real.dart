@@ -304,9 +304,16 @@ class OhosVideoController extends PlatformVideoController {
     }
 
     _platformViewId = viewId;
-    final surface = int.parse(surfaceId.toString());
+    await _bindSurface(viewId, int.parse(surfaceId.toString()));
+  }
 
+  /// Points mpv at [surface], the XComponent surface of the view [viewId].
+  Future<void> _bindSurface(int viewId, int surface) async {
     await lock.synchronized(() async {
+      // Detached while waiting for the lock: the surface may already be gone.
+      if (_platformViewId != viewId) {
+        return;
+      }
       // As with the texture path, the surface has to be known before the GPU
       // video output is brought up.
       await setProperty('vo', 'null');
@@ -314,7 +321,36 @@ class OhosVideoController extends PlatformVideoController {
       await setProperty('vo', configuration.vo!);
     });
 
-    wid.value = surface;
+    // Detached meanwhile: detachPlatformView has already cleared [wid], and
+    // [_dispose] may have disposed it.
+    if (_platformViewId == viewId) {
+      wid.value = surface;
+    }
+  }
+
+  /// Handles calls from the native side.
+  ///
+  /// `PlatformView.SurfaceChanged`: flutter_ohos rebuilds every platform
+  /// view's node on a colour mode change, which recreates the XComponent and
+  /// its surface. mpv still renders into the old, destroyed window until it is
+  /// pointed at the new one, so the video goes black.
+  static Future<void> _onMethodCall(MethodCall call) async {
+    try {
+      switch (call.method) {
+        case 'PlatformView.SurfaceChanged':
+          final viewId = int.parse(call.arguments['viewId'].toString());
+          final surface = int.parse(call.arguments['surfaceId'].toString());
+          for (final controller in [..._controllers.values]) {
+            if (controller._platformViewId == viewId) {
+              await controller._bindSurface(viewId, surface);
+            }
+          }
+          break;
+      }
+    } catch (exception, stacktrace) {
+      debugPrint(exception.toString());
+      debugPrint(stacktrace.toString());
+    }
   }
 
   /// Detaches and releases the platform view backing this controller.
@@ -373,5 +409,7 @@ class OhosVideoController extends PlatformVideoController {
   static final _controllers = HashMap<int, OhosVideoController>();
 
   /// [MethodChannel] for invoking platform specific native implementation.
-  static const _channel = MethodChannel('com.alexmercerind/media_kit_video');
+  static final _channel =
+      const MethodChannel('com.alexmercerind/media_kit_video')
+        ..setMethodCallHandler(_onMethodCall);
 }

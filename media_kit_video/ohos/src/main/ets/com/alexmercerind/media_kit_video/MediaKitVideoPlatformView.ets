@@ -18,6 +18,12 @@ const TAG = "MediaKitVideoPlatformView";
 export const MEDIA_KIT_VIDEO_VIEW_TYPE: string = "com.alexmercerind/media_kit_video/view";
 
 /**
+ * Called when a view that already handed its surface to the Dart side gets a
+ * new one, so mpv can be pointed at it.
+ */
+export type SurfaceReplacedListener = (viewId: number, surfaceId: string) => void;
+
+/**
  * XComponent controller that forwards surface lifecycle to the owning
  * [MediaKitVideoPlatformView].
  *
@@ -43,7 +49,7 @@ class MediaKitXComponentController extends XComponentController {
 
   onSurfaceDestroyed(surfaceId: string): void {
     Log.i(TAG, `onSurfaceDestroyed: ${surfaceId}`);
-    this.owner.onSurfaceDestroyed();
+    this.owner.onSurfaceDestroyed(surfaceId);
   }
 }
 
@@ -95,10 +101,18 @@ export class MediaKitVideoPlatformView extends PlatformView {
   // Resolvers waiting for the surface to come up. Settled with null if the
   // view is disposed first.
   private pending: Array<(surfaceId: string | null) => void> = [];
+  // The surface the Dart side was last given, and so the one mpv renders
+  // into. flutter_ohos rebuilds every platform view's node on a colour mode
+  // change (FlutterAbilityAndEntryDelegate.changeColorMode), which recreates
+  // the XComponent and its surface. Without telling mpv, it keeps drawing into
+  // the destroyed window and the video goes black.
+  private deliveredSurfaceId: string = '';
+  private onSurfaceReplaced: SurfaceReplacedListener;
 
-  constructor(viewId: number) {
+  constructor(viewId: number, onSurfaceReplaced: SurfaceReplacedListener) {
     super();
     this.viewId = viewId;
+    this.onSurfaceReplaced = onSurfaceReplaced;
     this.controller = new MediaKitXComponentController(this);
   }
 
@@ -122,11 +136,26 @@ export class MediaKitVideoPlatformView extends PlatformView {
     this.surfaceId = surfaceId;
     const waiting = this.pending;
     this.pending = [];
-    waiting.forEach((resolve: (surfaceId: string | null) => void) => resolve(surfaceId));
+    if (waiting.length > 0) {
+      this.deliveredSurfaceId = surfaceId;
+      waiting.forEach((resolve: (surfaceId: string | null) => void) => resolve(surfaceId));
+      return;
+    }
+    // Only a surface replacing one mpv already uses needs reporting; the first
+    // one reaches the Dart side through awaitSurfaceId().
+    if (this.deliveredSurfaceId.length === 0 || this.deliveredSurfaceId === surfaceId) {
+      return;
+    }
+    this.deliveredSurfaceId = surfaceId;
+    this.onSurfaceReplaced(this.viewId, surfaceId);
   }
 
-  onSurfaceDestroyed(): void {
-    this.surfaceId = '';
+  onSurfaceDestroyed(surfaceId: string): void {
+    // A rebuild may report the new surface before the old one is destroyed;
+    // only forget the surface that actually went away.
+    if (this.surfaceId === surfaceId) {
+      this.surfaceId = '';
+    }
   }
 
   /**
@@ -136,6 +165,7 @@ export class MediaKitVideoPlatformView extends PlatformView {
    */
   awaitSurfaceId(): Promise<string | null> {
     if (this.surfaceId.length > 0) {
+      this.deliveredSurfaceId = this.surfaceId;
       return Promise.resolve(this.surfaceId);
     }
     return new Promise<string | null>((resolve: (surfaceId: string | null) => void) => {
@@ -152,6 +182,7 @@ export class MediaKitVideoPlatformView extends PlatformView {
     this.pending = [];
     waiting.forEach((resolve: (surfaceId: string | null) => void) => resolve(null));
     this.surfaceId = '';
+    this.deliveredSurfaceId = '';
   }
 }
 
@@ -159,14 +190,16 @@ export class MediaKitVideoPlatformViewFactory extends PlatformViewFactory {
   // Views are kept so that the plugin can resolve a surface ID from the view
   // ID that the Dart side knows about.
   private views: Map<number, MediaKitVideoPlatformView> = new Map();
+  private onSurfaceReplaced: SurfaceReplacedListener;
 
-  constructor() {
+  constructor(onSurfaceReplaced: SurfaceReplacedListener) {
     super(StandardMessageCodec.INSTANCE);
+    this.onSurfaceReplaced = onSurfaceReplaced;
   }
 
   create(context: common.Context, viewId: number, args: Any): PlatformView {
     Log.i(TAG, `create: ${viewId}`);
-    const view = new MediaKitVideoPlatformView(viewId);
+    const view = new MediaKitVideoPlatformView(viewId, this.onSurfaceReplaced);
     this.views.set(viewId, view);
     return view;
   }

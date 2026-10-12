@@ -52,7 +52,8 @@ export default class MediaKitVideoPlugin implements FlutterPlugin, MethodCallHan
     this.binding = binding;
     // Registered unconditionally; the Dart side only instantiates the view
     // when platform view rendering is requested (needed for HDR output).
-    this.platformViewFactory = new MediaKitVideoPlatformViewFactory();
+    this.platformViewFactory = new MediaKitVideoPlatformViewFactory(
+      (viewId: number, surfaceId: string) => this.notifySurfaceReplaced(viewId, surfaceId));
     binding.getPlatformViewRegistry()
       ?.registerViewFactory(MEDIA_KIT_VIDEO_VIEW_TYPE, this.platformViewFactory);
   }
@@ -65,6 +66,16 @@ export default class MediaKitVideoPlugin implements FlutterPlugin, MethodCallHan
     this.videoOutputManager = null;
     this.channel = null;
     this.binding = null;
+  }
+
+  // The XComponent behind a platform view was rebuilt (see
+  // MediaKitVideoPlatformView.deliveredSurfaceId); the Dart side re-points
+  // mpv's --wid at the new surface.
+  private notifySurfaceReplaced(viewId: number, surfaceId: string): void {
+    const args: Map<string, string> = new Map();
+    args.set('viewId', viewId.toString());
+    args.set('surfaceId', surfaceId);
+    this.channel?.invokeMethod('PlatformView.SurfaceChanged', args);
   }
 
   onMethodCall(call: MethodCall, result: MethodResult): void {
